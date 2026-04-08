@@ -1,9 +1,44 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+/* ════════════════════ SUPABASE ════════════════════ */
+const supabase = createClient(
+  "https://zfydfnqwaeyetwloigzl.supabase.co",
+  "sb_publishable_HyFEPs3czw9dyhTiw98dLg_e6Au6FD4"
+);
 
 const DB = {
-  async get(k) { try { const r = await window.storage.get(k); return r ? JSON.parse(r.value) : null; } catch { return null; } },
-  async set(k, v) { try { await window.storage.set(k, JSON.stringify(v)); return true; } catch { return false; } },
-  async del(k) { try { await window.storage.delete(k); return true; } catch { return false; } },
+  // Students
+  async getStudent(nim) {
+    const { data } = await supabase.from("students").select("*").eq("nim", nim).single();
+    if (!data) return null;
+    return { ...data, babs: data.babs || [], approvals: data.approvals || [], createdAt: data.created_at };
+  },
+  async getAllStudents() {
+    const { data } = await supabase.from("students").select("*").order("created_at", { ascending: false });
+    return (data || []).map(s => ({ ...s, babs: s.babs || [], approvals: s.approvals || [], createdAt: s.created_at }));
+  },
+  async saveStudent(s) {
+    const row = { nim: s.nim, nama: s.nama, universitas: s.universitas || "", prodi: s.prodi, level: s.level, judul: s.judul, password: s.password, sk: s.sk || null, babs: s.babs, approvals: s.approvals || [] };
+    const { error } = await supabase.from("students").upsert(row, { onConflict: "nim" });
+    return !error;
+  },
+  // Logs
+  async getLogs(nim) {
+    const { data } = await supabase.from("logs").select("*").eq("nim", nim).order("created_at", { ascending: false }).limit(50);
+    return (data || []).map(l => ({ time: l.created_at, text: l.text }));
+  },
+  async addLog(nim, text) {
+    await supabase.from("logs").insert({ nim, text });
+  },
+  // Config
+  async getConfig(key) {
+    const { data } = await supabase.from("config").select("value").eq("key", key).single();
+    return data?.value || null;
+  },
+  async setConfig(key, value) {
+    await supabase.from("config").upsert({ key, value }, { onConflict: "key" });
+  },
 };
 
 const BAB_NAMES = ["Bab I — Pendahuluan", "Bab II — Kajian Pustaka", "Bab III — Metodologi", "Bab IV — Hasil & Pembahasan", "Bab V — Kesimpulan"];
@@ -34,47 +69,53 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const sList = await DB.get("students-list") || [];
-      const loaded = [];
-      for (const nim of sList) { const s = await DB.get(`student:${nim}`); if (s) loaded.push(s); }
-      setStudents(loaded);
-      const sess = await DB.get("session");
-      if (sess?.type === "student") { const s = await DB.get(`student:${sess.nim}`); if (s) { setUser(s); setView("student"); } }
-      else if (sess?.type === "dosen") setView("dosen");
+      const all = await DB.getAllStudents();
+      setStudents(all);
+      // Session from localStorage (lightweight, just session tracking)
+      try {
+        const sess = JSON.parse(localStorage.getItem("eb_session") || "null");
+        if (sess?.type === "student") {
+          const s = await DB.getStudent(sess.nim);
+          if (s) { setUser(s); setView("student"); }
+        } else if (sess?.type === "dosen") { setView("dosen"); }
+      } catch {}
       setLoading(false);
     })();
   }, [rk]);
 
   const saveStu = async (s) => {
-    await DB.set(`student:${s.nim}`, s);
-    const list = await DB.get("students-list") || [];
-    if (!list.includes(s.nim)) { list.push(s.nim); await DB.set("students-list", list); }
+    await DB.saveStudent(s);
     refresh();
   };
   const addLog = async (nim, text) => {
-    const logs = await DB.get(`logs:${nim}`) || [];
-    logs.unshift({ time: new Date().toISOString(), text });
-    await DB.set(`logs:${nim}`, logs);
+    await DB.addLog(nim, text);
   };
-  const logout = async () => { await DB.del("session"); setUser(null); setView("landing"); setSelId(null); refresh(); };
+  const logout = async () => {
+    localStorage.removeItem("eb_session");
+    setUser(null); setView("landing"); setSelId(null); refresh();
+  };
 
   const doLogin = async (nim, pass) => {
-    const s = await DB.get(`student:${nim}`);
+    const s = await DB.getStudent(nim);
     if (!s) return "NIM tidak ditemukan";
     if (s.password !== pass) return "Password salah";
-    await DB.set("session", { type: "student", nim }); setUser(s); setView("student"); return null;
+    localStorage.setItem("eb_session", JSON.stringify({ type: "student", nim }));
+    setUser(s); setView("student"); return null;
   };
   const doRegister = async (data) => {
-    if (await DB.get(`student:${data.nim}`)) return "NIM sudah terdaftar";
+    const exist = await DB.getStudent(data.nim);
+    if (exist) return "NIM sudah terdaftar";
     const s = { ...data, babs: newBabs(), sk: null, approvals: [], createdAt: new Date().toISOString() };
-    await saveStu(s); await addLog(s.nim, "Registrasi akun baru");
-    await DB.set("session", { type: "student", nim: s.nim }); setUser(s); setView("student"); return null;
+    await DB.saveStudent(s); await DB.addLog(s.nim, "Registrasi akun baru");
+    localStorage.setItem("eb_session", JSON.stringify({ type: "student", nim: s.nim }));
+    setUser(s); setView("student"); return null;
   };
   const doDosenLogin = async (key) => {
-    const customKey = await DB.get("dosen-key");
+    const customKey = await DB.getConfig("dosen_key");
     const activeKey = customKey || DOSEN_KEY_DEFAULT;
     if (key !== activeKey) return "Kode akses salah";
-    await DB.set("session", { type: "dosen" }); setView("dosen"); return null;
+    localStorage.setItem("eb_session", JSON.stringify({ type: "dosen" }));
+    setView("dosen"); return null;
   };
 
   if (loading) return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.bg }}><p style={{ color: C.t3, fontFamily: "DM Sans,sans-serif", fontSize: 14 }}>Memuat e-Bimbingan...</p></div>;
@@ -133,7 +174,7 @@ function ForgotPassword({ onBack }) {
 
   const findStudent = async () => {
     if (!nim.trim()) { setErr("Masukkan NIM anda"); return; }
-    const s = await DB.get(`student:${nim.trim()}`);
+    const s = await DB.getStudent(nim.trim());
     if (!s) { setErr("NIM tidak ditemukan. Pastikan NIM yang dimasukkan benar."); return; }
     setNama(s.nama);
     setStep("confirm");
@@ -141,13 +182,11 @@ function ForgotPassword({ onBack }) {
   };
 
   const resetPassword = async () => {
-    const s = await DB.get(`student:${nim.trim()}`);
+    const s = await DB.getStudent(nim.trim());
     if (!s) return;
     s.password = nim.trim();
-    await DB.set(`student:${s.nim}`, s);
-    const logs = await DB.get(`logs:${s.nim}`) || [];
-    logs.unshift({ time: new Date().toISOString(), text: "Password di-reset oleh mahasiswa (lupa password)" });
-    await DB.set(`logs:${s.nim}`, logs);
+    await DB.saveStudent(s);
+    await DB.addLog(s.nim, "Password di-reset oleh mahasiswa (lupa password)");
     setStep("done");
   };
 
@@ -224,7 +263,7 @@ function StudentView({ user, saveStu, addLog, logout, rk, refresh }) {
   const [ud, setUd] = useState(user);
   const [logs, setLogs] = useState([]);
 
-  useEffect(() => { (async () => { const s = await DB.get(`student:${user.nim}`); if (s) { if (!s.sk) s.sk = null; if (!s.approvals) s.approvals = []; if (!s.babs[0].supervisionLogs) s.babs = s.babs.map(b => ({...b, supervisionLogs: b.supervisionLogs || []})); setUd(s); } const l = await DB.get(`logs:${user.nim}`) || []; setLogs(l); })(); }, [rk, user.nim]);
+  useEffect(() => { (async () => { const s = await DB.getStudent(user.nim); if (s) { if (!s.sk) s.sk = null; if (!s.approvals) s.approvals = []; s.babs = (s.babs || []).map(b => ({...b, supervisionLogs: b.supervisionLogs || []})); setUd(s); } const l = await DB.getLogs(user.nim); setLogs(l); })(); }, [rk, user.nim]);
 
   const skApproved = ud.sk?.status === "approved";
   const approved = ud.babs.filter(b => b.status === "approved").length;
@@ -417,7 +456,7 @@ function RekapitulasiTab({ students }) {
     (async () => {
       const allLogs = {};
       for (const s of students) {
-        const l = await DB.get(`logs:${s.nim}`) || [];
+        const l = await DB.getLogs(s.nim);
         allLogs[s.nim] = l;
       }
       setLogs(allLogs);
@@ -526,9 +565,9 @@ function DosenView({ students, selId, setSelId, saveStu, addLog, logout, rk, ref
   useEffect(() => {
     if (!selId) { setSd(null); return; }
     (async () => {
-      const s = await DB.get(`student:${selId}`);
-      if (s) { if (!s.sk) s.sk = null; if (!s.approvals) s.approvals = []; if (!s.babs[0].supervisionLogs) s.babs = s.babs.map(b => ({...b, supervisionLogs: b.supervisionLogs || []})); setSd(s); }
-      const l = await DB.get(`logs:${selId}`) || [];
+      const s = await DB.getStudent(selId);
+      if (s) { if (!s.sk) s.sk = null; if (!s.approvals) s.approvals = []; s.babs = (s.babs || []).map(b => ({...b, supervisionLogs: b.supervisionLogs || []})); setSd(s); }
+      const l = await DB.getLogs(selId);
       setLogs(l);
     })();
   }, [selId, rk]);
@@ -899,12 +938,12 @@ function DosenSettings() {
 
   const changeKey = async () => {
     if (!oldKey || !newKey || !confirmKey) { setMsg({ type: "err", text: "Semua field wajib diisi" }); return; }
-    const customKey = await DB.get("dosen-key");
+    const customKey = await DB.getConfig("dosen_key");
     const activeKey = customKey || DOSEN_KEY_DEFAULT;
     if (oldKey !== activeKey) { setMsg({ type: "err", text: "Kode akses lama salah" }); return; }
     if (newKey.length < 4) { setMsg({ type: "err", text: "Kode akses baru minimal 4 karakter" }); return; }
     if (newKey !== confirmKey) { setMsg({ type: "err", text: "Konfirmasi kode akses tidak cocok" }); return; }
-    await DB.set("dosen-key", newKey);
+    await DB.setConfig("dosen_key", newKey);
     setOldKey(""); setNewKey(""); setConfirmKey("");
     setMsg({ type: "ok", text: "Kode akses berhasil diubah" });
   };
