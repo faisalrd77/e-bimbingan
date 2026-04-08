@@ -81,7 +81,8 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "'Source Serif 4',Georgia,serif", color: C.text }}>
       <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
       {view === "landing" && <Landing onS={() => setView("login")} onD={() => setView("dosen-login")} />}
-      {view === "login" && <Login onLogin={doLogin} onReg={() => setView("register")} onBack={() => setView("landing")} />}
+      {view === "login" && <Login onLogin={doLogin} onReg={() => setView("register")} onForgot={() => setView("forgot")} onBack={() => setView("landing")} />}
+      {view === "forgot" && <ForgotPassword onBack={() => setView("login")} />}
       {view === "register" && <Register onReg={doRegister} onBack={() => setView("login")} />}
       {view === "dosen-login" && <DosenLogin onLogin={doDosenLogin} onBack={() => setView("landing")} />}
       {view === "student" && user && <StudentView user={user} saveStu={saveStu} addLog={addLog} logout={logout} rk={rk} refresh={refresh} />}
@@ -109,24 +110,80 @@ function Landing({ onS, onD }) {
 }
 
 /* ═══════ AUTH PAGES ═══════ */
-function Login({ onLogin, onReg, onBack }) {
+function Login({ onLogin, onReg, onForgot, onBack }) {
   const [nim, setNim] = useState(""); const [pass, setPass] = useState(""); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
   const go = async () => { if (!nim || !pass) { setErr("Isi NIM dan password"); return; } setBusy(true); setErr(""); const e = await onLogin(nim.trim(), pass); if (e) setErr(e); setBusy(false); };
   return <AuthWrap onBack={onBack} title="Masuk" sub="Gunakan NIM dan password anda">
     {err && <Err>{err}</Err>}
     <Lbl>NIM</Lbl><Inp v={nim} set={setNim} ph="NIM" />
     <Lbl mt>Password</Lbl><Inp v={pass} set={setPass} ph="Password" pw onKey={go} />
+    <div style={{ textAlign: "right", marginTop: 6 }}><span onClick={onForgot} style={{ fontSize: 12, color: C.accent, cursor: "pointer", fontFamily: "DM Sans,sans-serif", fontWeight: 500 }}>Lupa password?</span></div>
     <Btn onClick={go} disabled={busy} full mt>{busy ? "Memproses..." : "Masuk"}</Btn>
     <p style={{ fontSize: 13, color: C.t2, marginTop: 16, textAlign: "center", fontFamily: "DM Sans,sans-serif" }}>Belum punya akun? <span onClick={onReg} style={{ color: C.accent, cursor: "pointer", fontWeight: 600 }}>Daftar di sini</span></p>
   </AuthWrap>;
 }
 
+function ForgotPassword({ onBack }) {
+  const [nim, setNim] = useState("");
+  const [step, setStep] = useState("input"); // input | confirm | done
+  const [nama, setNama] = useState("");
+  const [err, setErr] = useState("");
+
+  const findStudent = async () => {
+    if (!nim.trim()) { setErr("Masukkan NIM anda"); return; }
+    const s = await DB.get(`student:${nim.trim()}`);
+    if (!s) { setErr("NIM tidak ditemukan. Pastikan NIM yang dimasukkan benar."); return; }
+    setNama(s.nama);
+    setStep("confirm");
+    setErr("");
+  };
+
+  const resetPassword = async () => {
+    const s = await DB.get(`student:${nim.trim()}`);
+    if (!s) return;
+    s.password = nim.trim();
+    await DB.set(`student:${s.nim}`, s);
+    const logs = await DB.get(`logs:${s.nim}`) || [];
+    logs.unshift({ time: new Date().toISOString(), text: "Password di-reset oleh mahasiswa (lupa password)" });
+    await DB.set(`logs:${s.nim}`, logs);
+    setStep("done");
+  };
+
+  return <AuthWrap onBack={onBack} title="Lupa Password" sub="Reset password anda ke default (NIM)">
+    {step === "input" && <>
+      {err && <Err>{err}</Err>}
+      <Lbl>NIM</Lbl>
+      <Inp v={nim} set={setNim} ph="Masukkan NIM anda" onKey={findStudent} />
+      <Btn onClick={findStudent} full mt>Cari Akun</Btn>
+    </>}
+    {step === "confirm" && <>
+      <div style={{ padding: 14, borderRadius: 10, background: "#FAEEDA", marginBottom: 16 }}>
+        <p style={{ fontSize: 13, fontFamily: "DM Sans,sans-serif", color: "#854F0B", margin: 0, lineHeight: 1.6 }}>
+          Akun ditemukan: <strong>{nama}</strong> ({nim}). Password akan di-reset menjadi NIM anda. Setelah login, segera ganti password.
+        </p>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn onClick={resetPassword} full>Ya, Reset Password</Btn>
+        <button onClick={() => { setStep("input"); setNim(""); }} style={{ ...btn("transparent", C.t2), padding: "10px 18px", fontSize: 13, border: `1px solid ${C.bdr}`, borderRadius: 8, flex: 1 }}>Batal</button>
+      </div>
+    </>}
+    {step === "done" && <>
+      <div style={{ padding: 14, borderRadius: 10, background: "#E1F5EE", marginBottom: 16 }}>
+        <p style={{ fontSize: 13, fontFamily: "DM Sans,sans-serif", color: "#085041", margin: 0, lineHeight: 1.6 }}>
+          Password berhasil di-reset. Gunakan <strong>NIM ({nim})</strong> sebagai password untuk login. Segera ganti password setelah masuk.
+        </p>
+      </div>
+      <Btn onClick={onBack} full>Kembali ke Login</Btn>
+    </>}
+  </AuthWrap>;
+}
+
 function Register({ onReg, onBack }) {
-  const [f, sf] = useState({ nim: "", nama: "", prodi: "", level: LEVELS[0], judul: "", password: "" });
+  const [f, sf] = useState({ nim: "", nama: "", universitas: "", prodi: "", level: LEVELS[0], judul: "", password: "" });
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
   const s = (k, v) => sf(p => ({ ...p, [k]: v }));
   const go = async () => {
-    if (!f.nim || !f.nama || !f.prodi || !f.judul || !f.password) { setErr("Semua field wajib diisi"); return; }
+    if (!f.nim || !f.nama || !f.universitas || !f.prodi || !f.judul || !f.password) { setErr("Semua field wajib diisi"); return; }
     if (f.password.length < 4) { setErr("Password minimal 4 karakter"); return; }
     setBusy(true); setErr(""); const e = await onReg(f); if (e) setErr(e); setBusy(false);
   };
@@ -136,12 +193,13 @@ function Register({ onReg, onBack }) {
       <div><Lbl>NIM</Lbl><Inp v={f.nim} set={v => s("nim", v)} ph="NIM" /></div>
       <div><Lbl>Nama Lengkap</Lbl><Inp v={f.nama} set={v => s("nama", v)} ph="Nama" /></div>
     </div>
+    <Lbl mt>Universitas</Lbl><Inp v={f.universitas} set={v => s("universitas", v)} ph="Nama universitas" />
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
       <div><Lbl>Program Studi</Lbl><Inp v={f.prodi} set={v => s("prodi", v)} ph="Prodi" /></div>
       <div><Lbl>Level</Lbl><select value={f.level} onChange={e => s("level", e.target.value)} style={{ ...iStyle(), appearance: "auto" }}>{LEVELS.map(l => <option key={l}>{l}</option>)}</select></div>
     </div>
     <Lbl mt>Judul Penelitian</Lbl>
-    <textarea value={f.judul} onChange={e => s("judul", e.target.value)} rows={3} placeholder="Judul penelitian" style={{ ...iStyle(), resize: "vertical", fontFamily: "inherit" }} />
+    <textarea value={f.judul} onChange={e => s("judul", e.target.value)} rows={3} placeholder="Judul penelitian (bisa diubah nanti)" style={{ ...iStyle(), resize: "vertical", fontFamily: "inherit" }} />
     <Lbl mt>Password</Lbl><Inp v={f.password} set={v => s("password", v)} ph="Minimal 4 karakter" pw />
     <Btn onClick={go} disabled={busy} full mt>{busy ? "Mendaftar..." : "Daftar"}</Btn>
   </AuthWrap>;
@@ -204,7 +262,7 @@ function StudentView({ user, saveStu, addLog, logout, rk, refresh }) {
         <Card>
           <span style={badge(C.al, C.accent)}>{ud.level}</span>
           <p style={{ fontSize: 15, fontWeight: 600, margin: "8px 0 2px" }}>{ud.judul || "Judul belum ditentukan"}</p>
-          <p style={sub()}>{ud.prodi}</p>
+          <p style={sub()}>{ud.universitas ? `${ud.universitas} — ` : ""}{ud.prodi}</p>
           <div style={{ marginTop: 10 }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
               <span style={sub()}>Progres keseluruhan</span>
@@ -216,7 +274,7 @@ function StudentView({ user, saveStu, addLog, logout, rk, refresh }) {
 
         {/* Tabs */}
         <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${C.bdr}`, marginBottom: 16 }}>
-          {[{ id: "progress", l: "Progres" }, { id: "approvals", l: "Pengesahan" }, { id: "logs", l: "Log" }].map(t => (
+          {[{ id: "progress", l: "Progres" }, { id: "approvals", l: "Pengesahan" }, { id: "logs", l: "Log" }, { id: "settings", l: "Pengaturan" }].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={tabStyle(tab === t.id)}>{t.l}</button>
           ))}
         </div>
@@ -277,9 +335,181 @@ function StudentView({ user, saveStu, addLog, logout, rk, refresh }) {
           <SectionLabel>Log aktivitas</SectionLabel>
           {logs.length === 0 ? <Empty>Belum ada aktivitas</Empty> : logs.map((l, i) => <LogRow key={i} l={l} last={i === logs.length - 1} />)}
         </Card>}
+
+        {tab === "settings" && <StudentSettings ud={ud} saveStu={saveStu} addLog={addLog} onUpdate={(s) => setUd(s)} refresh={refresh} />}
       </div>
     </div>
   );
+}
+
+/* ═══════ STUDENT SETTINGS ═══════ */
+function StudentSettings({ ud, saveStu, addLog, onUpdate, refresh }) {
+  const [oldPw, setOldPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [pwMsg, setPwMsg] = useState(null);
+  const [judul, setJudul] = useState(ud.judul || "");
+  const [judulMsg, setJudulMsg] = useState(null);
+
+  const changePassword = async () => {
+    if (!oldPw || !newPw || !confirmPw) { setPwMsg({ type: "err", text: "Semua field wajib diisi" }); return; }
+    if (oldPw !== ud.password) { setPwMsg({ type: "err", text: "Password lama salah" }); return; }
+    if (newPw.length < 4) { setPwMsg({ type: "err", text: "Password baru minimal 4 karakter" }); return; }
+    if (newPw !== confirmPw) { setPwMsg({ type: "err", text: "Konfirmasi password tidak cocok" }); return; }
+    const s = { ...ud, password: newPw };
+    await saveStu(s); await addLog(s.nim, "Mengubah password");
+    onUpdate(s); refresh(); setOldPw(""); setNewPw(""); setConfirmPw("");
+    setPwMsg({ type: "ok", text: "Password berhasil diubah" });
+  };
+
+  const updateJudul = async () => {
+    if (!judul.trim()) { setJudulMsg({ type: "err", text: "Judul tidak boleh kosong" }); return; }
+    if (judul.trim() === ud.judul) { setJudulMsg({ type: "err", text: "Judul tidak berubah" }); return; }
+    const s = { ...ud, judul: judul.trim() };
+    await saveStu(s); await addLog(s.nim, `Mengubah judul penelitian menjadi: "${judul.trim()}"`);
+    onUpdate(s); refresh();
+    setJudulMsg({ type: "ok", text: "Judul berhasil diperbarui" });
+  };
+
+  return <>
+    {/* Ubah Judul */}
+    <Card>
+      <SectionLabel>Judul penelitian</SectionLabel>
+      <p style={{ ...sub(), marginBottom: 10 }}>Judul dapat diubah jika ada perubahan selama proses bimbingan.</p>
+      {judulMsg && <div style={{ padding: "8px 12px", borderRadius: 6, marginBottom: 10, background: judulMsg.type === "ok" ? "#E1F5EE" : "#FCEBEB", color: judulMsg.type === "ok" ? "#085041" : "#A32D2D", fontSize: 12, fontFamily: "DM Sans,sans-serif" }}>{judulMsg.text}</div>}
+      <textarea value={judul} onChange={e => setJudul(e.target.value)} rows={3} style={{ ...iStyle(), resize: "vertical", fontFamily: "DM Sans,sans-serif" }} />
+      <Btn onClick={updateJudul} mt>Simpan Judul</Btn>
+    </Card>
+
+    {/* Ganti Password */}
+    <Card>
+      <SectionLabel>Ganti password</SectionLabel>
+      {pwMsg && <div style={{ padding: "8px 12px", borderRadius: 6, marginBottom: 10, background: pwMsg.type === "ok" ? "#E1F5EE" : "#FCEBEB", color: pwMsg.type === "ok" ? "#085041" : "#A32D2D", fontSize: 12, fontFamily: "DM Sans,sans-serif" }}>{pwMsg.text}</div>}
+      <Lbl>Password Lama</Lbl><Inp v={oldPw} set={setOldPw} ph="Masukkan password lama" pw />
+      <Lbl mt>Password Baru</Lbl><Inp v={newPw} set={setNewPw} ph="Minimal 4 karakter" pw />
+      <Lbl mt>Konfirmasi Password Baru</Lbl><Inp v={confirmPw} set={setConfirmPw} ph="Ulangi password baru" pw />
+      <Btn onClick={changePassword} mt>Ubah Password</Btn>
+    </Card>
+
+    {/* Info Akun */}
+    <Card>
+      <SectionLabel>Informasi akun</SectionLabel>
+      <div style={{ fontSize: 13, fontFamily: "DM Sans,sans-serif", lineHeight: 2 }}>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.t2 }}>NIM</span><span style={{ fontWeight: 500 }}>{ud.nim}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.t2 }}>Nama</span><span style={{ fontWeight: 500 }}>{ud.nama}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.t2 }}>Universitas</span><span style={{ fontWeight: 500 }}>{ud.universitas || "-"}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.t2 }}>Program Studi</span><span style={{ fontWeight: 500 }}>{ud.prodi}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.t2 }}>Level</span><span style={{ fontWeight: 500 }}>{ud.level}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.t2 }}>Terdaftar</span><span style={{ fontWeight: 500 }}>{fmtDate(ud.createdAt)}</span></div>
+      </div>
+    </Card>
+  </>;
+}
+
+/* ═══════ REKAPITULASI PEMBIMBINGAN (DOSEN) ═══════ */
+function RekapitulasiTab({ students }) {
+  const [filter, setFilter] = useState("all");
+  const [logs, setLogs] = useState({});
+
+  useEffect(() => {
+    (async () => {
+      const allLogs = {};
+      for (const s of students) {
+        const l = await DB.get(`logs:${s.nim}`) || [];
+        allLogs[s.nim] = l;
+      }
+      setLogs(allLogs);
+    })();
+  }, [students]);
+
+  const fs = filter === "all" ? students : students.filter(s => s.level.startsWith(filter));
+
+  const totalBimbingan = students.reduce((n, s) => n + s.babs.reduce((m, b) => m + (b.supervisionLogs?.length || 0), 0), 0);
+  const totalLinks = students.reduce((n, s) => n + s.babs.reduce((m, b) => m + b.links.length, 0), 0);
+  const totalComments = students.reduce((n, s) => n + s.babs.reduce((m, b) => m + b.comments.filter(c => c.from === "dosen").length, 0), 0);
+  const totalApproved = students.reduce((n, s) => n + s.babs.filter(b => b.status === "approved").length, 0);
+
+  return <>
+    {/* Summary metrics */}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 16 }}>
+      <MetricCard label="Total Bimbingan" value={totalBimbingan} color={C.accent} />
+      <MetricCard label="Draft Diterima" value={totalLinks} color="#185FA5" />
+      <MetricCard label="Feedback Dosen" value={totalComments} color="#534AB7" />
+      <MetricCard label="Bab Disetujui" value={totalApproved} color="#1D9E75" />
+    </div>
+
+    {/* Filter */}
+    <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+      {["all", "S1", "S2", "S3"].map(f => <button key={f} onClick={() => setFilter(f)} style={filterBtn(filter === f)}>{f === "all" ? "Semua" : f}</button>)}
+    </div>
+
+    {/* Per-student recap */}
+    {fs.length === 0 ? <Card><Empty>Belum ada mahasiswa</Empty></Card> : fs.map(s => {
+      const babApproved = s.babs.filter(b => b.status === "approved").length;
+      const babDraft = s.babs.filter(b => b.status === "draft").length;
+      const babRevisi = s.babs.filter(b => b.status === "revisi").length;
+      const totalSupLogs = s.babs.reduce((n, b) => n + (b.supervisionLogs?.length || 0), 0);
+      const totalStuLinks = s.babs.reduce((n, b) => n + b.links.length, 0);
+      const totalDosenFb = s.babs.reduce((n, b) => n + b.comments.filter(c => c.from === "dosen").length, 0);
+      const stuLogs = logs[s.nim] || [];
+      const lastActivity = stuLogs.length > 0 ? stuLogs[0] : null;
+
+      return (
+        <Card key={s.nim}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+            <div>
+              <p style={{ fontSize: 14, fontWeight: 600, margin: "0 0 2px", fontFamily: "DM Sans,sans-serif" }}>{s.nama}</p>
+              <p style={sub()}>{s.nim} — {s.universitas ? `${s.universitas}, ` : ""}{s.prodi}</p>
+            </div>
+            <span style={badge(C.al, C.accent)}>{s.level.split(" — ")[0]}</span>
+          </div>
+
+          <p style={{ fontSize: 13, margin: "0 0 8px", lineHeight: 1.5, fontStyle: "italic", color: C.t2, fontFamily: "DM Sans,sans-serif" }}>{s.judul}</p>
+
+          {/* Progress bar */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+            {s.babs.map((b, i) => <div key={i} style={{ flex: 1, height: 6, borderRadius: 3, background: SC[b.status].dot }} title={`${BAB_NAMES[i]}: ${STATUS[b.status]}`} />)}
+          </div>
+
+          {/* Stats grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: 10 }}>
+            <div style={{ background: "#E1F5EE", borderRadius: 6, padding: "6px 8px", textAlign: "center" }}>
+              <p style={{ fontSize: 16, fontWeight: 600, margin: 0, color: "#085041" }}>{babApproved}/5</p>
+              <p style={{ fontSize: 10, margin: 0, color: "#0F6E56", fontFamily: "DM Sans,sans-serif" }}>Disetujui</p>
+            </div>
+            <div style={{ background: "#EEEDFE", borderRadius: 6, padding: "6px 8px", textAlign: "center" }}>
+              <p style={{ fontSize: 16, fontWeight: 600, margin: 0, color: "#3C3489" }}>{totalSupLogs}</p>
+              <p style={{ fontSize: 10, margin: 0, color: "#534AB7", fontFamily: "DM Sans,sans-serif" }}>Bimbingan</p>
+            </div>
+            <div style={{ background: "#E6F1FB", borderRadius: 6, padding: "6px 8px", textAlign: "center" }}>
+              <p style={{ fontSize: 16, fontWeight: 600, margin: 0, color: "#0C447C" }}>{totalDosenFb}</p>
+              <p style={{ fontSize: 10, margin: 0, color: "#185FA5", fontFamily: "DM Sans,sans-serif" }}>Feedback</p>
+            </div>
+          </div>
+
+          {/* Status per bab */}
+          <div style={{ marginTop: 10 }}>
+            {s.babs.map((b, i) => {
+              const supCount = b.supervisionLogs?.length || 0;
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: i < 4 ? `0.5px solid ${C.bdr}` : "none" }}>
+                  <div style={{ width: 7, height: 7, borderRadius: "50%", background: SC[b.status].dot, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, fontFamily: "DM Sans,sans-serif", flex: 1 }}>Bab {i + 1}</span>
+                  <span style={{ fontSize: 10, fontFamily: "DM Sans,sans-serif", color: SC[b.status].text, background: SC[b.status].bg, padding: "1px 6px", borderRadius: 3 }}>{STATUS[b.status]}</span>
+                  <span style={{ fontSize: 10, fontFamily: "DM Sans,sans-serif", color: C.t3 }}>{b.links.length} draft · {supCount} bimbingan</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Last activity */}
+          {lastActivity && <div style={{ marginTop: 8, padding: "6px 10px", borderRadius: 6, background: "#fafaf8", border: `0.5px solid ${C.bdr}` }}>
+            <p style={{ fontSize: 11, fontFamily: "DM Sans,sans-serif", color: C.t3, margin: 0 }}>Aktivitas terakhir: <span style={{ color: C.text }}>{lastActivity.text}</span> — {fmtDate(lastActivity.time)}</p>
+          </div>}
+        </Card>
+      );
+    })}
+  </>;
 }
 
 /* ═══════ DOSEN VIEW ═══════ */
@@ -289,6 +519,7 @@ function DosenView({ students, selId, setSelId, saveStu, addLog, logout, rk, ref
   const [ab, setAb] = useState(-1);
   const [tab, setTab] = useState("progress");
   const [filter, setFilter] = useState("all");
+  const [dosenTab, setDosenTab] = useState("list"); // list | rekap
 
   useEffect(() => {
     if (!selId) { setSd(null); return; }
@@ -339,6 +570,14 @@ function DosenView({ students, selId, setSelId, saveStu, addLog, logout, rk, ref
       <div style={{ minHeight: "100vh" }}>
         <Header title="e-Bimbingan" sub="Dashboard Dosen" onLogout={logout} />
         <div style={{ maxWidth: 700, margin: "0 auto", padding: "16px 16px 60px" }}>
+          {/* Dosen Tabs */}
+          <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${C.bdr}`, marginBottom: 16 }}>
+            {[{ id: "list", l: "Daftar Mahasiswa" }, { id: "rekap", l: "Rekapitulasi" }].map(t => <button key={t.id} onClick={() => setDosenTab(t.id)} style={tabStyle(dosenTab === t.id)}>{t.l}</button>)}
+          </div>
+
+          {dosenTab === "rekap" && <RekapitulasiTab students={students} />}
+
+          {dosenTab === "list" && <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 16 }}>
             <MetricCard label="Mahasiswa" value={students.length} />
             <MetricCard label="Draft Masuk" value={totalDraft} color="#EF9F27" />
@@ -373,6 +612,7 @@ function DosenView({ students, selId, setSelId, saveStu, addLog, logout, rk, ref
               </div>
             );
           })}
+          </>}
         </div>
       </div>
     );
@@ -384,9 +624,14 @@ function DosenView({ students, selId, setSelId, saveStu, addLog, logout, rk, ref
       <Header title={sd.nama} sub={`${sd.nim} — ${sd.level}`} onLogout={logout} onBack={() => { setSelId(null); setSd(null); }} />
       <div style={{ maxWidth: 700, margin: "0 auto", padding: "16px 16px 60px" }}>
         <Card>
-          <span style={badge(C.al, C.accent)}>{sd.level}</span>
-          <p style={{ fontSize: 15, fontWeight: 600, margin: "8px 0 2px" }}>{sd.judul}</p>
-          <p style={sub()}>{sd.prodi}</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <span style={badge(C.al, C.accent)}>{sd.level}</span>
+              <p style={{ fontSize: 15, fontWeight: 600, margin: "8px 0 2px" }}>{sd.judul}</p>
+              <p style={sub()}>{sd.universitas ? `${sd.universitas} — ` : ""}{sd.prodi}</p>
+            </div>
+            <ResetPasswordBtn student={sd} saveStu={saveStu} addLog={addLog} onDone={(s) => { setSd(s); refresh(); }} />
+          </div>
           <div style={{ display: "flex", gap: 4, marginTop: 10 }}>{sd.babs.map((b, i) => <div key={i} style={{ flex: 1, height: 6, borderRadius: 3, background: SC[b.status].dot }} />)}</div>
           <p style={{ fontSize: 11, color: C.t3, margin: "4px 0 0", fontFamily: "DM Sans,sans-serif" }}>{sd.babs.filter(b => b.status === "approved").length}/5 bab disetujui</p>
         </Card>
@@ -639,6 +884,25 @@ function LinkForm({ onSubmit, label, placeholder, btnLabel }) {
       <Btn onClick={() => { if (li.trim()) { onSubmit(li.trim(), ni.trim()); setLi(""); setNi(""); } }} disabled={!li.trim()} mt>{btnLabel}</Btn>
     </div>
   );
+}
+
+/* ═══════ RESET PASSWORD (DOSEN) ═══════ */
+function ResetPasswordBtn({ student, saveStu, addLog, onDone }) {
+  const [step, setStep] = useState("idle"); // idle | confirm | done
+  if (step === "idle") return <button onClick={() => setStep("confirm")} style={{ ...btn("transparent", C.danger), padding: "5px 10px", fontSize: 11, fontWeight: 500, border: `1px solid ${C.danger}`, borderRadius: 6 }}>Reset Password</button>;
+  if (step === "confirm") return (
+    <div style={{ padding: 10, borderRadius: 8, background: "#FCEBEB", border: "1px solid #F09595" }}>
+      <p style={{ fontSize: 12, fontFamily: "DM Sans,sans-serif", color: "#791F1F", margin: "0 0 8px", lineHeight: 1.5 }}>Reset password <strong>{student.nama}</strong> ke NIM ({student.nim})?</p>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={async () => {
+          const s = { ...student, password: student.nim };
+          await saveStu(s); await addLog(s.nim, "Password di-reset oleh dosen"); onDone(s); setStep("done");
+        }} style={{ ...btn("#c53030", "#fff"), padding: "5px 12px", fontSize: 11, fontWeight: 600, borderRadius: 6 }}>Ya, Reset</button>
+        <button onClick={() => setStep("idle")} style={{ ...btn("transparent", C.t3), padding: "5px 12px", fontSize: 11, borderRadius: 6 }}>Batal</button>
+      </div>
+    </div>
+  );
+  return <span style={{ fontSize: 11, fontFamily: "DM Sans,sans-serif", color: "#085041", background: "#E1F5EE", padding: "4px 10px", borderRadius: 5, fontWeight: 500 }}>Password di-reset</span>;
 }
 
 /* ═══════ SHARED COMPONENTS ═══════ */
