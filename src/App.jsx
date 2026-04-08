@@ -15,7 +15,7 @@ const SC = {
   revisi: { bg: "#FAECE7", text: "#993C1D", dot: "#D85A30" },
   approved: { bg: "#E1F5EE", text: "#085041", dot: "#1D9E75" },
 };
-const DOSEN_KEY = "frd77";
+const DOSEN_KEY_DEFAULT = "frd77";
 const C = {
   bg: "#f8f7f4", bg2: "#ffffff", accent: "#1a5632", accent2: "#2d8a4e", al: "#e8f5ee",
   text: "#1a1a1a", t2: "#5f5e5a", t3: "#888780", bdr: "#e8e6e1", danger: "#c53030",
@@ -71,7 +71,9 @@ export default function App() {
     await DB.set("session", { type: "student", nim: s.nim }); setUser(s); setView("student"); return null;
   };
   const doDosenLogin = async (key) => {
-    if (key !== DOSEN_KEY) return "Kode akses salah";
+    const customKey = await DB.get("dosen-key");
+    const activeKey = customKey || DOSEN_KEY_DEFAULT;
+    if (key !== activeKey) return "Kode akses salah";
     await DB.set("session", { type: "dosen" }); setView("dosen"); return null;
   };
 
@@ -572,10 +574,12 @@ function DosenView({ students, selId, setSelId, saveStu, addLog, logout, rk, ref
         <div style={{ maxWidth: 700, margin: "0 auto", padding: "16px 16px 60px" }}>
           {/* Dosen Tabs */}
           <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${C.bdr}`, marginBottom: 16 }}>
-            {[{ id: "list", l: "Daftar Mahasiswa" }, { id: "rekap", l: "Rekapitulasi" }].map(t => <button key={t.id} onClick={() => setDosenTab(t.id)} style={tabStyle(dosenTab === t.id)}>{t.l}</button>)}
+            {[{ id: "list", l: "Daftar Mahasiswa" }, { id: "rekap", l: "Rekapitulasi" }, { id: "settings", l: "Pengaturan" }].map(t => <button key={t.id} onClick={() => setDosenTab(t.id)} style={tabStyle(dosenTab === t.id)}>{t.l}</button>)}
           </div>
 
           {dosenTab === "rekap" && <RekapitulasiTab students={students} />}
+
+          {dosenTab === "settings" && <DosenSettings />}
 
           {dosenTab === "list" && <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 16 }}>
@@ -884,6 +888,47 @@ function LinkForm({ onSubmit, label, placeholder, btnLabel }) {
       <Btn onClick={() => { if (li.trim()) { onSubmit(li.trim(), ni.trim()); setLi(""); setNi(""); } }} disabled={!li.trim()} mt>{btnLabel}</Btn>
     </div>
   );
+}
+
+/* ═══════ DOSEN SETTINGS ═══════ */
+function DosenSettings() {
+  const [oldKey, setOldKey] = useState("");
+  const [newKey, setNewKey] = useState("");
+  const [confirmKey, setConfirmKey] = useState("");
+  const [msg, setMsg] = useState(null);
+
+  const changeKey = async () => {
+    if (!oldKey || !newKey || !confirmKey) { setMsg({ type: "err", text: "Semua field wajib diisi" }); return; }
+    const customKey = await DB.get("dosen-key");
+    const activeKey = customKey || DOSEN_KEY_DEFAULT;
+    if (oldKey !== activeKey) { setMsg({ type: "err", text: "Kode akses lama salah" }); return; }
+    if (newKey.length < 4) { setMsg({ type: "err", text: "Kode akses baru minimal 4 karakter" }); return; }
+    if (newKey !== confirmKey) { setMsg({ type: "err", text: "Konfirmasi kode akses tidak cocok" }); return; }
+    await DB.set("dosen-key", newKey);
+    setOldKey(""); setNewKey(""); setConfirmKey("");
+    setMsg({ type: "ok", text: "Kode akses berhasil diubah" });
+  };
+
+  return <>
+    <Card>
+      <SectionLabel>Ubah kode akses dosen</SectionLabel>
+      <p style={{ ...sub(), marginBottom: 12 }}>Kode akses digunakan untuk login ke dashboard dosen. Pastikan anda mengingat kode baru.</p>
+      {msg && <div style={{ padding: "8px 12px", borderRadius: 6, marginBottom: 10, background: msg.type === "ok" ? "#E1F5EE" : "#FCEBEB", color: msg.type === "ok" ? "#085041" : "#A32D2D", fontSize: 12, fontFamily: "DM Sans,sans-serif" }}>{msg.text}</div>}
+      <Lbl>Kode Akses Lama</Lbl><Inp v={oldKey} set={setOldKey} ph="Masukkan kode lama" pw />
+      <Lbl mt>Kode Akses Baru</Lbl><Inp v={newKey} set={setNewKey} ph="Minimal 4 karakter" pw />
+      <Lbl mt>Konfirmasi Kode Baru</Lbl><Inp v={confirmKey} set={setConfirmKey} ph="Ulangi kode baru" pw />
+      <Btn onClick={changeKey} mt>Ubah Kode Akses</Btn>
+    </Card>
+
+    <Card>
+      <SectionLabel>Informasi sistem</SectionLabel>
+      <div style={{ fontSize: 13, fontFamily: "DM Sans,sans-serif", lineHeight: 2 }}>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.t2 }}>Aplikasi</span><span style={{ fontWeight: 500 }}>e-Bimbingan v3</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.t2 }}>Pengembang</span><span style={{ fontWeight: 500 }}>frd77</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: C.t2 }}>Penyimpanan</span><span style={{ fontWeight: 500 }}>Browser Storage (lokal)</span></div>
+      </div>
+    </Card>
+  </>;
 }
 
 /* ═══════ RESET PASSWORD (DOSEN) ═══════ */
