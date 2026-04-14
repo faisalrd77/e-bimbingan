@@ -147,7 +147,7 @@ function Landing({ onS, onD }) {
         <button onClick={onS} style={{ ...btn(C.accent, "#fff"), padding: "14px 24px", fontSize: 15, fontWeight: 600 }}>Masuk sebagai Mahasiswa</button>
         <button onClick={onD} style={{ ...btn("transparent", C.accent), padding: "14px 24px", fontSize: 15, fontWeight: 500, border: `1.5px solid ${C.accent}` }}>Dashboard Dosen</button>
       </div>
-      <p style={{ fontSize: 12, color: C.t3, marginTop: 40, fontFamily: "DM Sans,sans-serif" }}>by frd77</p>
+      <p style={{ fontSize: 12, color: C.t3, marginTop: 40, fontFamily: "DM Sans,sans-serif" }}>by frd77@2026</p>
     </div>
   );
 }
